@@ -1,4 +1,4 @@
-# 🕊️ pigeon
+# 👑🕊️ pigeon
 
 Define procedures on the server, call them from the browser.
 
