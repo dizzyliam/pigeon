@@ -2,7 +2,7 @@
 
 version       = "0.1.0"
 author        = "Liam Scaife"
-description   = "🕊️ Frontend/backend communication through shared procedures."
+description   = "🕊️ Define procedures on the server, call them from the browser."
 license       = "MIT"
 srcDir        = "src"
 
