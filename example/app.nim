@@ -1,7 +1,7 @@
 import pigeon
 
 autoRoute:
-    proc getSource(): string =
+    proc getSource(filename: string): string =
         readFile "app.nim"
 
 clientSide:
@@ -14,7 +14,7 @@ clientSide:
             button:
                 text "CLICK ME"
                 proc onclick(ev: Event; n: VNode) =
-                    code = getSource()
+                    code = getSource("app.nim")
 
             pre text code
     
