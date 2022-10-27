@@ -23,7 +23,7 @@ macro serverSide*(body: untyped): untyped =
         return body
 
 clientSide:
-    import request
+    import pigeon / request
     import uri
 
 serverSide:
@@ -34,7 +34,9 @@ proc readName(route: var Route, name: string) {.compileTime.} =
     route.name = name
     route.originalName = name
 
+    # Try to infer route method from the proc's name.
     for m in methods:
+
         if route.name.toLower.find(m.toLower) == 0:
             route.rMethod = m
             
@@ -45,6 +47,7 @@ proc readName(route: var Route, name: string) {.compileTime.} =
 
 macro autoRoute*(args: varargs[untyped]): untyped =
 
+    # Allow a port to be specified.
     var port = newIntLitNode(8080)
     if args.len == 2:
         port = args[0]

@@ -17,7 +17,7 @@ proc request*(endPoint: string, meth: string, data: JsonNode): tuple[status: int
             url &= "?"
             url &= encodeQuery(args)
 
-    httpRequest.open(meth, url, false)
+    httpRequest.open(meth, url.cstring, false)
 
     if meth == "POST":
         httpRequest.setRequestHeader("Content-Type", "application/json")

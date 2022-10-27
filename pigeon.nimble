@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.0"
+version       = "0.1.1"
 author        = "Liam Scaife"
 description   = "🕊️ Define procedures on the server, call them from the browser."
 license       = "MIT"
