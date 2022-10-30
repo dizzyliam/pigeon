@@ -13,6 +13,7 @@ type Route = object
     rMethod: string
     returns: NimNode
     takes: seq[tuple[name: string, argType: NimNode]]
+    postfix: string
 
 macro clientSide*(body: untyped): untyped =
     if defined(js):
@@ -120,6 +121,14 @@ macro autoRoute*(args: varargs[untyped]): untyped =
             route.rMethod = "POST"
             warning "Defaulting to POST method for proc: " & route.originalName
         
+        var count = 0
+        for i in routes:
+            if i.name == route.name and i.rMethod == route.rMethod:
+                count += 1
+        
+        if count > 0:
+            route.postfix = "/" & $count
+        
         routes.add route
 
         # Define proc for the server to use.
@@ -145,7 +154,7 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                     `pgArgs`[`name`] = %*`nameIdent`
             
             let 
-                endPoint = route.name
+                endPoint = route.name & route.postfix
                 rMethod = route.rMethod
                 returns = route.returns
             
@@ -172,7 +181,7 @@ macro autoRoute*(args: varargs[untyped]): untyped =
 
             let 
                 rMethod = route.rMethod
-                url = "/" & route.name
+                url = "/" & route.name & route.postfix
 
             var call = newNimNode(nnkCall)
             call.add newIdentNode(route.originalName)
