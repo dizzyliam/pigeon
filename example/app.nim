@@ -2,7 +2,7 @@ import pigeon
 
 autoRoute:
     proc getSource(filename: string): string =
-        readFile "app.nim"
+        readFile filename
 
 clientSide:
     include karax / prelude
