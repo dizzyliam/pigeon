@@ -157,12 +157,21 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                 endPoint = route.name & route.postfix
                 rMethod = route.rMethod
                 returns = route.returns
+                responseIdent = ident "response"
+            
+            var resultStatement: NimNode
+            if returns.kind != nnkEmpty:
+                resultStatement = quote do:
+                    return to(`responseIdent`.text.parseJson, `returns`)
+            else:
+                resultStatement = quote do:
+                    return
             
             # An AJAX request is made and the result converted to the correct type.
             newContent.add quote do:
-                let response = request(`endPoint`, `rMethod`, `pgArgs`)
+                let `responseIdent` = request(`endPoint`, `rMethod`, `pgArgs`)
                 if response.status == 200:
-                    return to(response.text.parseJson, `returns`)
+                    `resultStatement`
                 else:
                     raise newException(IOError, "HTTP Error " & $response.status)
                     
@@ -201,10 +210,20 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                             to(parseJson(@`name`), `argType`)
                     
                     # Add a case for the route.
-                    routerCases.add quote do:
-                        if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
-                            let pgResult = `call`
-                            resp %*pgResult
+
+                    if route.returns.kind != nnkEmpty:
+
+                        routerCases.add quote do:
+                            if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
+                                let pgResult = `call`
+                                resp %*pgResult
+                    
+                    else:
+
+                        routerCases.add quote do:
+                            if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
+                                `call`
+                                resp
                 
                 of "POST":
 
@@ -221,11 +240,22 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                             to(`jsonIdent`[`name`], `argType`)
                     
                     # Add a case for the route.
-                    routerCases.add quote do:
-                        if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
-                            let `jsonIdent` = parseJson(`request`.body)
-                            let pgResult = `call`
-                            resp %*pgResult
+                    
+                    if route.returns.kind != nnkEmpty:
+                        
+                        routerCases.add quote do:
+                            if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
+                                let `jsonIdent` = parseJson(`request`.body)
+                                `call`
+                                resp Http200
+                    
+                    else:
+
+                        routerCases.add quote do:
+                            if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
+                                let `jsonIdent` = parseJson(`request`.body)
+                                `call`
+                                resp Http200
 
                 else:
                     error "Unsupported request method"

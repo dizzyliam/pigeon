@@ -2,7 +2,7 @@
 
 Define procedures on the server, call them from the browser.
 
-Pigeon replaces HTTP boilerplate with idiomatic Nim. When compiling to C (and friends), procedures defined within the `autoRoute` macro are automatically exposed as an API via Jester. When compiling to JS, matching procedures are created that make requests to the API. All arguments and return values are marshalled into JSON for the journey.
+Pigeon replaces HTTP boilerplate with nothing but Nim procedures. When compiling to C (and friends), procedures defined within the `autoRoute` macro are automatically exposed as an API via Jester. When compiling to JS, matching procedures are created that make requests to the API. All arguments and return values are marshalled into JSON for the journey.
 
 The result is a dissolution of the barriers between frontend and backend, letting you write them as one unified piece of software.
 
