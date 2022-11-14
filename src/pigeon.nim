@@ -1,27 +1,12 @@
 import strutils
-import json
 import macros
+import json
 
-const methods = [
-    "GET",
-    "POST"
+import pigeon / [
+    utils,
+    types,
+    route
 ]
-
-type Route = object
-    name: string
-    originalName: string
-    rMethod: string
-    returns: NimNode
-    takes: seq[tuple[name: string, argType: NimNode]]
-    postfix: string
-
-macro clientSide*(body: untyped): untyped =
-    if defined(js):
-        return body
-
-macro serverSide*(body: untyped): untyped =
-    if not defined(js):
-        return body
 
 clientSide:
     import pigeon / request
@@ -30,21 +15,6 @@ clientSide:
 serverSide:
     import jester
     export jester
-
-proc readName(route: var Route, name: string) {.compileTime.} =
-    route.name = name
-    route.originalName = name
-
-    # Try to infer route method from the proc's name.
-    for m in methods:
-
-        if route.name.toLower.find(m.toLower) == 0:
-            route.rMethod = m
-            
-            let first = route.name[route.rMethod.len].toLowerAscii
-            route.name = first & route.name[route.rMethod.len+1..^1]
-
-            break
 
 macro autoRoute*(args: varargs[untyped]): untyped =
 
@@ -60,80 +30,18 @@ macro autoRoute*(args: varargs[untyped]): untyped =
     result = newStmtList()
     var routes: seq[Route]
 
-    for def in body:
+    for statement in body:
         
-        if def.kind != nnkProcDef:
+        if statement.kind != nnkProcDef:
             error "Only procedure definitions are allowed in the autoRoute macro"
 
-        var route: Route
-
-        # Read the name of the proc.
-
-        if def[0].kind == nnkIdent:
-            route.readName def[0].strVal
-
-        elif def[0].kind == nnkPostfix:
-            route.readName def[0][1].strVal
-
-        else:
-            error "Could not read proc name"
-        
-        # Get the proc's return type.
-        route.returns = def[3][0]
-
-        # Parse out all the proc's arguments.
-        if def[3].len > 1:
-
-            for i in def[3][1..^1]:
-                i.expectKind nnkIdentDefs
-
-                for arg in i[0..^3]:
-                    route.takes.add (name: arg.strVal, argType: i[^2])
-        
-        # See if there are any pragmas specifying a method.
-        var pragmaIndex = -1
-        for index, p in def[4]:
-
-            if p.strVal.toUpper in methods:
-
-                if pragmaIndex == -1:
-                    pragmaIndex = index
-                else:
-                    error "Multiple HTTP methods specified by proc pragmas"
-
-                if p.strVal.toUpper != route.rMethod:
-
-                    route.rMethod = p.strVal.toUpper
-                    route.name = route.originalName
-                
-                break
-
-        # Cleanup leftover pragmas.
-
-        if pragmaIndex != -1:
-            def[4].del pragmaIndex
-
-        if def[4].len == 0:
-            def[4] = newEmptyNode()
-        
-        # Default to the POST method (assume unsafe).
-        if route.rMethod == "":
-            route.rMethod = "POST"
-            warning "Defaulting to POST method for proc: " & route.originalName
-        
-        var count = 0
-        for i in routes:
-            if i.name == route.name and i.rMethod == route.rMethod:
-                count += 1
-        
-        if count > 0:
-            route.postfix = "/" & $count
-        
+        # Make a route object.
+        var def = statement
+        let route = makeRoute def
         routes.add route
 
-        # Define proc for the server to use.
-        serverSide:
-            result.add def
+        # Define proc.
+        result.add def
 
         # Create new innards for the client side version of the proc.
         clientSide:
@@ -154,8 +62,8 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                     `pgArgs`[`name`] = %*`nameIdent`
             
             let 
-                endPoint = route.name & route.postfix
-                rMethod = route.rMethod
+                endPoint = route.name
+                verb = route.verb
                 returns = route.returns
                 responseIdent = ident "response"
             
@@ -166,17 +74,22 @@ macro autoRoute*(args: varargs[untyped]): untyped =
             else:
                 resultStatement = quote do:
                     return
+
+            var arguments: seq[tuple[name: string, place: Place]]
+            for t in route.takes:
+                arguments.add (name: t.name, place: t.place)
             
             # An AJAX request is made and the result converted to the correct type.
             newContent.add quote do:
-                let `responseIdent` = request(`endPoint`, `rMethod`, `pgArgs`)
+                let `responseIdent` = request(`endPoint`, Verb(`verb`), `pgArgs`, `arguments`)
                 if response.status == 200:
                     `resultStatement`
                 else:
                     raise newException(IOError, "HTTP Error " & $response.status)
                     
-            result.add def
             result[^1][^1] = newContent
+
+            echo newContent.treeRepr
 
     # Build the jester router for the sever side.
     serverSide:
@@ -189,84 +102,71 @@ macro autoRoute*(args: varargs[untyped]): untyped =
         for route in routes:
 
             let 
-                rMethod = route.rMethod
-                url = "/" & route.name & route.postfix
+                verb = $route.verb
+                url = "/" & route.name
 
             var call = newNimNode(nnkCall)
-            call.add newIdentNode(route.originalName)
+            call.add newIdentNode(route.name)
 
-            case rMethod:
+            let jsonIdent = ident "pgJson"
 
-                of "GET":
-                    
-                    # Build a function call with arguments taken from the request.
-                    for t in route.takes:
+            # Build a function call with arguments taken from the request.
+            for t in route.takes:
 
-                        let 
-                            name = t.name
-                            argType = t.argType
-
-                        call.add quote do:
-                            to(parseJson(@`name`), `argType`)
-                    
-                    # Add a case for the route.
-
-                    if route.returns.kind != nnkEmpty:
-
-                        routerCases.add quote do:
-                            if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
-                                let pgResult = `call`
-                                resp %*pgResult
-                    
-                    else:
-
-                        routerCases.add quote do:
-                            if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
-                                `call`
-                                resp
+                let 
+                    name = t.name
+                    kind = t.kind
+                    place = t.place
                 
-                of "POST":
+                case place:
 
-                    let jsonIdent = ident "pgJson"
-
-                    # Build a function call with arguments taken from the request.
-                    for t in route.takes:
-
-                        let 
-                            name = t.name
-                            argType = t.argType
-
+                    of bodyPlace:
                         call.add quote do:
-                            to(`jsonIdent`[`name`], `argType`)
-                    
-                    # Add a case for the route.
-                    
-                    if route.returns.kind != nnkEmpty:
-                        
-                        routerCases.add quote do:
-                            if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
-                                let `jsonIdent` = parseJson(`request`.body)
-                                `call`
-                                resp Http200
+                            to(`jsonIdent`[`name`], `kind`)
                     
                     else:
+                        call.add quote do:
+                            to(parseJson(@`name`), `kind`)
+            
+            # Add a case for the route.
+            
+            if route.returns.kind != nnkEmpty:
+                
+                routerCases.add quote do:
+                    if `url` == `request`.pathInfo and `verb` == $(`request`.reqMeth):
+                        let `jsonIdent` = parseJson(`request`.body)
+                        resp `call`
+            
+            else:
 
-                        routerCases.add quote do:
-                            if `url` == `request`.pathInfo and `rMethod` == $(`request`.reqMeth):
-                                let `jsonIdent` = parseJson(`request`.body)
-                                `call`
-                                resp Http200
-
-                else:
-                    error "Unsupported request method"
+                routerCases.add quote do:
+                    if `url` == `request`.pathInfo and `verb` == $(`request`.reqMeth):
+                        let `jsonIdent` = parseJson(`request`.body)
+                        `call`
+                        resp Http200
 
         # Create the matching proc and start a Jester server.
         result.add quote do:
-            proc match(`request`: Request): Future[ResponseData] {.async.} =
+            proc pgMatch(`request`: Request): Future[ResponseData] {.async.} =
                 block `routeBlock`:
                     `routerCases`
 
-            let port = Port(`port`)
-            let settings = newSettings(port=port)
-            var jester = initJester(match, settings=settings)
-            jester.serve()
+macro serve*(
+    port: static[int] = 8080, 
+    staticDir: static[string] = "./public"
+) =
+
+    return quote do:
+        serverSide:
+
+                let 
+                    settings = newSettings(
+                        port = Port(`port`), 
+                        staticDir = `staticDir`
+                    )
+
+                var jester = initJester(pgMatch, settings=settings)
+                jester.serve()
+        
+        clientSide:
+            discard

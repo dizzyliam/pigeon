@@ -2,67 +2,54 @@
 
 Define procedures on the server, call them from the browser.
 
-Pigeon replaces HTTP boilerplate with nothing but Nim procedures. When compiling to C (and friends), procedures defined within the `autoRoute` macro are automatically exposed as an API via Jester. When compiling to JS, matching procedures are created that make requests to the API. All arguments and return values are marshalled into JSON for the journey.
+Pigeon replaces HTTP boilerplate with nothing but Nim procedures. When compiling to C (and friends), selected procedures are automatically exposed as an API via Jester. When compiling to JS, matching procedures are created that make requests to the API.
 
-The result is a dissolution of the barriers between frontend and backend, letting you write them as one unified piece of software.
+Pigeon gives you the ability to import your backend as a package into frontend code, even though they will run seperately, across different devices.
 
 ## Usage
 
 ### Simple Example
 
-This is a very simple example using Pigeon in conjunction with Karax:
+This is a very simple example of a server with one exposed procedure:
 
 ```nim
+# server.nim
+
 import pigeon
-
-autoRoute:
-    proc getSource(filename: string): string =
-        # This runs on the server side.
-        readFile filename
-
-clientSide:
-    include karax / prelude
-    var code: string
-
-    proc createDom(): VNode =
-        buildHtml(tdiv):
-
-            button:
-                text "CLICK ME"
-                proc onclick(ev: Event; n: VNode) =
-                    code = getSource("app.nim")
-
-            pre text code
-    
-    setRenderer createDom
-```
-
-Simply compile to C to create the server, then compile to JS to create the webapp (see `example/start.nims`). 
-
-It's worth noting that the `clientSide` macro is only used in this example so that it can be condensed into one file. In any real-world application, server and webapp functionality would be implimented in seperate files, e.g.:
-
-`server.nim` Would be compile to C:
-```nim
-import pigeon
-
-serverSide:
-    # Some code to only be run on the server,
-    # like imports or opening DB connections.
 
 autoRoute:
     proc getSource*(filename: string): string =
-        ...
+        readFile filename
+
+serve(8080)
 ```
 
-`webapp.nim` Would be compiled to JS:
+Here's a simple Karax SPA that simply imports and uses the exposed proc:
+
 ```nim
+# webapp.nim
+
 include karax / prelude
 import server
 
-# Use getSource in some way.
+var code: string
+
+proc createDom(): VNode =
+    buildHtml(tdiv):
+
+        button:
+            text "CLICK ME"
+            proc onclick(ev: Event; n: VNode) =
+                code = getSource("webapp.nim")
+
+        pre text code
+
+setRenderer createDom
 ```
 
-This is the power of Pigeon; it lets you import your backend like a library into frontend code, even though they will run seperately, across different devices.
+ `webapp.nim` is compiled to JS, then placed in the `public` directory with Karax boilerplate HTML. `server.nim` is compiled with the C backend and started. Done 😀
+
+ Check out the `example` directory to see this example in more detail.
 
 ### Smart Routes
 

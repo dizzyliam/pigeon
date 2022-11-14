@@ -2,24 +2,39 @@ import ajax
 import json
 import uri
 
-proc request*(endPoint: string, meth: string, data: JsonNode): tuple[status: int, text: string] =
+import types
+
+proc request*(endpoint: string, 
+    meth: Verb, 
+    data: JsonNode, 
+    arguments: seq[tuple[name: string, place: Place]] = @[]
+): tuple[status: int, text: string] =
+
     var 
         httpRequest = newXMLHttpRequest()
-        url = endPoint
+        url = endpoint
+        body: JsonNode
+        params: seq[(string, string)]
     
-    if meth == "GET":
-        var args: seq[(string, string)]
-        
-        for i in data.keys():
-            args.add (i, $data[i])
-        
-        if args.len > 0:
-            url &= "?"
-            url &= encodeQuery(args)
+    for arg in arguments:
+        case arg.place:
 
-    httpRequest.open(meth, url.cstring, false)
+            of queryPlace:
+                params.add (arg.name, $data[arg.name])
+            
+            of bodyPlace:
+                body[arg.name] = data[arg.name]
+            
+            else:
+                continue
+    
+    if params.len > 0:
+        url &= "?"
+        url &= encodeQuery(params)
 
-    if meth == "POST":
+    httpRequest.open(($meth).cstring, url.cstring, false)
+
+    if meth != GET:
         httpRequest.setRequestHeader("Content-Type", "application/json")
         httpRequest.send(($data).cstring)
     else:

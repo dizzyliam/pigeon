@@ -1,3 +1,3 @@
-exec "nim js -o:public/app.js app.nim"
-exec "nim c app.nim"
-exec "./app"
+exec "nim js -o:public/app.js webapp.nim"
+exec "nim c server.nim"
+exec "./server"
