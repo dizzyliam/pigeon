@@ -37,8 +37,6 @@ run 8080
 include karax / prelude
 import server
 
-var code: string
-
 proc createDom(): VNode =
     buildHtml(tdiv):
 

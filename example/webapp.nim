@@ -1,8 +1,6 @@
 include karax / prelude
 import server
 
-var code: string
-
 proc createDom(): VNode =
     buildHtml(tdiv):
 
