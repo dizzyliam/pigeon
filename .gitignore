@@ -2,4 +2,4 @@ example/server
 example/static/app.js
 
 test/backend
-text/static/test.js
+test/static/test.js
