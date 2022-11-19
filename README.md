@@ -2,29 +2,34 @@
 
 Define procedures on the server, call them from the browser.
 
-Pigeon replaces HTTP boilerplate with nothing but Nim procedures. When compiling to C (and friends), selected procedures are automatically exposed as an API via Jester. When compiling to JS, matching procedures are created that make requests to the API.
+Pigeon is a wrapper for [Prologue](https://github.com/planety/prologue) with a DSL for easily creating Remote Procedure Call (RPC) functionality for web applications. When compiling to C-like backends, procedures under the `autoRoute` macro are automatically exposed as an API. When compiling to JS, matching procedures are created that make AJAX requests to the server.
 
 Pigeon gives you the ability to import your backend as a package into frontend code, even though they will run seperately, across different devices.
 
-## Usage
+## Simple Example
 
-### Simple Example
-
-This is a very simple example of a server with one exposed procedure:
+This is a very simple example of a server with a couple of exposed procedures, and a Karax SPA that imports and uses them.
 
 ```nim
 # server.nim
 
 import pigeon
 
-autoRoute:
-    proc getSource*(filename: string): string =
-        readFile filename
+setup: 
+    var counter = 0
 
-serve(8080)
+autoRoute:
+
+    proc getCount*(): int =
+        return counter
+
+    proc incCount*(amount: int) =
+        counter += amount
+
+serve "static"
+run 8080
 ```
 
-Here's a simple Karax SPA that simply imports and uses the exposed proc:
 
 ```nim
 # webapp.nim
@@ -38,29 +43,42 @@ proc createDom(): VNode =
     buildHtml(tdiv):
 
         button:
-            text "CLICK ME"
+            text $getCount()
             proc onclick(ev: Event; n: VNode) =
-                code = getSource("webapp.nim")
-
-        pre text code
+                incCount(1)
 
 setRenderer createDom
 ```
 
- `webapp.nim` is compiled to JS, then placed in the `public` directory with Karax boilerplate HTML. `server.nim` is compiled with the C backend and started. Done 😀
+`webapp.nim` is compiled to JS, then placed in the `static` directory with Karax boilerplate HTML. `server.nim` is compiled with the C backend and started. Done 😀
 
- Check out the `example` directory to see this example in more detail.
+Run `start.nims` in the `example` directory to see this in action.
 
-### Smart Routes
+## Routing
 
-Although Pigeon aims to treat server/webapp communication like simple procedure calls, where specifics about resources and HTTP methods are unimportant, it's important to think about these things for interoperability and hackability.
+When using pigeon on the backend and frontend, you don't have to worry at all about the specifics of HTTP methods and routes, since you're just defining and calling procedures. However, if you're intending for the API to be used by clients other than a Nim web app, pigeon lets you control the underlying routes as well.
 
-Route methods are automatically infered from procedure names if possible. For example, the `getSource` procedure used above is mapped to the `GET` method because the name starts with that keyword. Methods can also be manually specified using the `{.get.}` and `{.post.}` pragmas.
+Methods are automatically infered from procedure names if possible. For example, the `getSource` procedure used above is mapped to the `GET` method because the name starts with that keyword. Similarly, a unique path is created for every procedure.
 
-Pigeon tries to map multiple procedures to the same resource if applicable. For example, if you define a `getThing` and `postThing` procedure, it will map these to the `GET` and `POST` methods on the single `/thing` resource.
+You can specify the method and path for an autorouted procedure by annotating it. This also lets you define path parameters. For example:
 
-If a method isn't specified and can't be infered, Pigeon will default to `POST`, as a mystery procedure must be assumed to have side-effects.
+```nim
+GET "/user/{username}/info"
+proc userInfo(username: string): User
+```
 
-### Why just `GET` and `POST`?
+All arguments not included `{in the path}` will be expected in a JSON body by default, or in query parameters in the case of the `GET`, `DELETE` and `HEAD` methods.
 
-These two HTTP methods simply read and modify resources, whichs maps well to the concept of calling a procedure. Implimenting methods such as `PUT` and `DELETE` would imply the creation and deletion of procedures at runtime, which is impossible. In future they could be implimented with custom annotations that define how parts of a URL are mapped to procedure arguments, similar to the OpenAPI specification.
+## Marshaling
+
+All procdeure arguments and return values, except for string types, are marshaled as JSON, allowing the use of custom types as well as primitives.
+
+## Prologue Routes
+
+For non-RPC routes, such as for serving the app itself, you can directly include Prologue handlers under `autoRoute`. For example:
+
+```nim
+GET "/"
+proc home(ctx: Context) {.async.} =
+    ctx.staticFileResponse("index.html", "")
+```

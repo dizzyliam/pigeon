@@ -1,12 +1,9 @@
 import macros
 
-type
+import httpcore
+export httpcore
 
-    Verb* {.pure.} = enum
-        GET = "GET"
-        POST = "POST"
-        PUT = "PUT"
-        DELETE = "DELETE"
+type
     
     Place* {.pure.} = enum
         urlPlace
@@ -17,10 +14,18 @@ type
         name*: string
         kind*: NimNode
         place*: Place
+        default*: NimNode
     
     Route* = object
         name*: string
         url*: string
-        verb*: Verb
+        suffix*: int
+        isPrologue*: bool
+        verb*: HttpMethod
         returns*: NimNode
         takes*: seq[Argument]
+    
+    RouteSpec* = object
+        active*: bool
+        verb*: HttpMethod
+        url*: string

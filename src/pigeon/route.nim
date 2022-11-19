@@ -1,5 +1,6 @@
 import strutils
 import macros
+import regex
 
 import types
 
@@ -7,15 +8,15 @@ proc readName(route: var Route, name: string) {.compileTime.} =
     route.name = name
 
     # Try to infer route method from the proc's name.
-    for m in Verb:
+    for m in HttpMethod:
 
         if route.name.toLower.find(($m).toLower) == 0:
             route.verb = m
 
-proc makeRoute*(def: var NimNode): Route {.compileTime.} =
+proc makeRoute*(def: NimNode, spec: RouteSpec): Route {.compileTime.} =
 
     # Default to the POST method (assume unsafe).
-    result.verb = POST
+    result.verb = HttpPost
 
     if def[0].kind == nnkIdent:
         result.readName def[0].strVal
@@ -26,30 +27,22 @@ proc makeRoute*(def: var NimNode): Route {.compileTime.} =
     else:
         error "Could not read proc name"
     
+    # Override verb from spec.
+    if spec.active:
+        result.verb = spec.verb
+    
     # Get the proc's return type.
     result.returns = def[3][0]
-    
-    # See if there are any pragmas specifying a method.
-    var pragmaIndex = -1
-    for index, p in def[4]:
-        
-        for m in Verb:
 
-            if m != result.verb and p.strVal.toUpper == $m:
-                result.verb = m
+    if spec.active:
+        result.url = spec.url
+    else:
+        result.url = "/" & result.name
 
-                if pragmaIndex == -1:
-                    pragmaIndex = index
-                else:
-                    error "Multiple HTTP methods specified by proc pragmas"
-
-    # Cleanup leftover pragmas.
-
-    if pragmaIndex != -1:
-        def[4].del pragmaIndex
-
-    if def[4].len == 0:
-        def[4] = newEmptyNode()
+    # Check for a native prologue route.
+    if def[3].len == 2 and def[3][1][1].strVal == "Context":
+        result.isPrologue = true
+        return
     
     # Parse out all the proc's arguments.
     if def[3].len > 1:
@@ -60,9 +53,13 @@ proc makeRoute*(def: var NimNode): Route {.compileTime.} =
             for arg in i[0..^3]:
 
                 var place = bodyPlace
-                if result.verb == GET:
-                    place = queryPlace
 
-                result.takes.add Argument(name: arg.strVal, kind: i[^2], place: place)
+                if result.verb in [HttpHead, HttpGet, HttpDelete]:
+                    place = queryPlace
+                
+                if ("{" & arg.strVal & "}") in result.url:
+                    place = urlPlace
+
+                result.takes.add Argument(name: arg.strVal, kind: i[^2], place: place, default: i[^1])
 
 

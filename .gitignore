@@ -1,2 +1,5 @@
 example/server
-example/public/app.js
+example/static/app.js
+
+test/backend
+text/static/test.js

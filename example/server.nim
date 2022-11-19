@@ -1,7 +1,15 @@
 import pigeon
 
-autoRoute:
-    proc getSource*(filename: string): string =
-        readFile filename
+setup: 
+    var counter = 0
 
-serve(8080)
+autoRoute:
+
+    proc getCount*(): int =
+        return counter
+
+    proc incCount*(amount: int) =
+        counter += amount
+
+serve "static"
+run 8080

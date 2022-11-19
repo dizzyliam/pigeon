@@ -1,3 +1,4 @@
+import algorithm
 import strutils
 import macros
 import json
@@ -8,80 +9,140 @@ import pigeon / [
     route
 ]
 
+export utils
+export to
+
 clientSide:
     import pigeon / request
     import uri
 
 serverSide:
-    import jester
-    export jester
+    import prologue
+    export prologue
 
+# This macro is massively too long 
+# and I intend to further break it down into procs.
 macro autoRoute*(args: varargs[untyped]): untyped =
-
-    # Allow a port to be specified.
-    var port = newIntLitNode(8080)
-    if args.len == 2:
-        port = args[0]
-    elif args.len > 2:
-        error "Too many arguments for autoRoute"
     
-    let body = args[^1]
+    let 
+        body = args[^1]
+        pgApp = ident "pgApp"
 
     result = newStmtList()
-    var routes: seq[Route]
+
+    serverSide:
+        result.add quote do:
+            var `pgApp` = newApp()
+
+    var 
+        routes: seq[Route]
+        spec: RouteSpec
 
     for statement in body:
         
-        if statement.kind != nnkProcDef:
-            error "Only procedure definitions are allowed in the autoRoute macro"
+        if statement.kind == nnkCommand:
+            for v in HttpMethod:
+                if ($v).toLower == statement[0].strVal.toLower:
+                    
+                    spec = RouteSpec(
+                        active: true,
+                        verb: v,
+                        url: statement[1].strVal
+                    )
+
+                    break
+            continue
 
         # Make a route object.
         var def = statement
-        let route = makeRoute def
+        var route = makeRoute(def, spec)
+        spec.active = false
+
+        # Check for url double ups.
+        for r in routes.reversed:
+            if r.url == route.url:
+                
+                try:
+                    route.suffix = r.url.split("/")[^1].parseInt
+                except ValueError:
+                    route.suffix = 1
+                
+                route.url &= "/" & $route.suffix
+                break
+
+        # Add the route.
         routes.add route
 
-        # Define proc.
+        let
+            url = route.url
+            verb = newLit route.verb
+            returns = route.returns
+            routeNameLit = ident route.name
+        
+        # Handle native prologue routes.
+        if route.isPrologue:
+
+            serverSide:
+                result.add def
+                result.add quote do:
+                    `pgApp`.addRoute(`url`, `routeNameLit`, @[`verb`])
+            
+            continue
+        
+        # Add proc definition.
         result.add def
 
         # Create new innards for the client side version of the proc.
         clientSide:
+
+            let 
+                responseIdent = ident "response"
+                pgBody = ident "pgBody"
+                pgUrl = ident "pgUrl"
+                pgParams = ident "pgParams"
             
             var newContent = newStmtList()
-                
-            var pgArgs = newIdentNode("pgArgs")
-            
-            # Arguments are collected into a JSON object.
             newContent.add quote do:
-                var `pgArgs` = %*{}
-
-            for arg in route.takes:
-                let 
-                    name = arg.name
-                    nameIdent = newIdentNode(arg.name)
-                newContent.add quote do:
-                    `pgArgs`[`name`] = %*`nameIdent`
+                var 
+                    `pgBody` = %*{}
+                    `pgUrl` = `url`
+                    `pgParams`: seq[(string, string)]
             
-            let 
-                endPoint = route.name
-                verb = route.verb
-                returns = route.returns
-                responseIdent = ident "response"
+            for t in route.takes:
+
+                let
+                    argName = newLit t.name
+                    argIdent = ident t.name
+
+                case t.place:
+
+                    of bodyPlace:
+                        newContent.add quote do:
+                            `pgBody`[`argName`] = %*`argIdent`
+                    
+                    of urlPlace:
+                        newContent.add quote do:
+                            `pgUrl` = `pgUrl`.replace("{" & `argName` & "}", marshal(`argIdent`))
+                    
+                    of queryPlace:
+                        newContent.add quote do:
+                            `pgParams`.add (`argName`, marshal(`argIdent`))
             
             var resultStatement: NimNode
             if returns.kind != nnkEmpty:
                 resultStatement = quote do:
-                    return to(`responseIdent`.text.parseJson, `returns`)
+                    return unmarshal(`responseIdent`.text, `returns`)
             else:
                 resultStatement = quote do:
                     return
-
-            var arguments: seq[tuple[name: string, place: Place]]
-            for t in route.takes:
-                arguments.add (name: t.name, place: t.place)
             
             # An AJAX request is made and the result converted to the correct type.
             newContent.add quote do:
-                let `responseIdent` = request(`endPoint`, Verb(`verb`), `pgArgs`, `arguments`)
+
+                if `pgParams`.len > 0:
+                    `pgUrl` &= "?" & encodeQuery(`pgParams`)
+
+                let `responseIdent` = request(`pgUrl`, `verb`, `pgBody`)
                 if response.status == 200:
                     `resultStatement`
                 else:
@@ -89,84 +150,83 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                     
             result[^1][^1] = newContent
 
-            echo newContent.treeRepr
-
-    # Build the jester router for the sever side.
-    serverSide:
-
-        var routerCases = newStmtList()
-
-        let request = ident "request"
-        let routeBlock = ident "route"
-
-        for route in routes:
+        # Build the server side route.
+        serverSide:
 
             let 
-                verb = $route.verb
-                url = "/" & route.name
+                handlerName = ident(route.name & "PGHandler" & $route.suffix)
+                ctx = ident "ctx"
+                body = ident "body"
 
-            var call = newNimNode(nnkCall)
-            call.add newIdentNode(route.name)
+            var handler = quote do:
+                proc `handlerName`(`ctx`: Context) {.async.} =
+                    var `body` = %*{}
+                    if `ctx`.request.body != "":
+                        `body` = parseJson `ctx`.request.body
 
-            let jsonIdent = ident "pgJson"
+            var call = newCall ident(route.name)
 
-            # Build a function call with arguments taken from the request.
-            for t in route.takes:
+            for arg in route.takes:
 
                 let 
-                    name = t.name
-                    kind = t.kind
-                    place = t.place
-                
-                case place:
+                    argName = newLit arg.name
+                    argTmpName = ident "pgTmp_" & arg.name
+                    argType = arg.kind
+                    default = arg.default
 
-                    of bodyPlace:
-                        call.add quote do:
-                            to(`jsonIdent`[`name`], `kind`)
+                case arg.place:
+
+                    of urlPlace:
+                        handler[^1].add quote do:
+                            var `argTmpName`: `argType` = `default`
+                            if `ctx`.getPathParamsOption(`argName`).isSome:
+                                `argTmpName` = unmarshal(`ctx`.getPathParamsOption(`argName`).get, `argType`)
                     
-                    else:
-                        call.add quote do:
-                            to(parseJson(@`name`), `kind`)
+                    of queryPlace:
+                        handler[^1].add quote do:
+                            var `argTmpName`: `argType` = `default`
+                            if `ctx`.getQueryParamsOption(`argName`).isSome:
+                                `argTmpName` = unmarshal(`ctx`.getQueryParamsOption(`argName`).get, `argType`)
+                    
+                    of bodyPlace:
+                        handler[^1].add quote do:
+                            var `argTmpName`: `argType` = `default`
+                            if `body`.hasKey(`argName`):
+                                `argTmpName` = `body`[`argName`].to(`argType`)
+                        
+                call.add quote do:
+                    `argTmpName`
             
-            # Add a case for the route.
-            
-            if route.returns.kind != nnkEmpty:
-                
-                routerCases.add quote do:
-                    if `url` == `request`.pathInfo and `verb` == $(`request`.reqMeth):
-                        let `jsonIdent` = parseJson(`request`.body)
-                        resp `call`
+            if route.returns.kind == nnkEmpty:
+                handler[^1].add quote do:
+                    `call`
+                    resp "", Http200
             
             else:
+                handler[^1].add quote do:
+                    resp marshal(`call`)
+            
+            result.add handler
+            result.add quote do:
+                `pgApp`.addRoute(`url`, `handlerName`, @[`verb`])
 
-                routerCases.add quote do:
-                    if `url` == `request`.pathInfo and `verb` == $(`request`.reqMeth):
-                        let `jsonIdent` = parseJson(`request`.body)
-                        `call`
-                        resp Http200
+macro serve*(dir: static[string]) =
+    return quote do:
+        serverSide:
 
-        # Create the matching proc and start a Jester server.
-        result.add quote do:
-            proc pgMatch(`request`: Request): Future[ResponseData] {.async.} =
-                block `routeBlock`:
-                    `routerCases`
+            import pigeon / middlewear
+            pgApp.use(pgStaticFileMiddlewear(`dir`))
+        
+        clientSide:
+            discard
 
-macro serve*(
-    port: static[int] = 8080, 
-    staticDir: static[string] = "./public"
-) =
+macro run*(port: static[int] = 8080) =
 
     return quote do:
         serverSide:
 
-                let 
-                    settings = newSettings(
-                        port = Port(`port`), 
-                        staticDir = `staticDir`
-                    )
-
-                var jester = initJester(pgMatch, settings=settings)
-                jester.serve()
+                pgApp.gScope.settings.port = Port(`port`)
+                pgApp.run()
         
         clientSide:
             discard

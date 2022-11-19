@@ -7,10 +7,8 @@ proc createDom(): VNode =
     buildHtml(tdiv):
 
         button:
-            text "CLICK ME"
+            text $getCount()
             proc onclick(ev: Event; n: VNode) =
-                code = getSource("webapp.nim")
-
-        pre text code
+                incCount(1)
 
 setRenderer createDom
