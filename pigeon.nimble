@@ -11,7 +11,7 @@ srcDir        = "src"
 
 requires "nim >= 1.0.0"
 requires "prologue"
-requires "rejex"
+requires "regex"
 requires "ajax"
 
 task test, "Tests the pigeon library. Visit the served page to confirm success.":
