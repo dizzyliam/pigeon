@@ -161,7 +161,7 @@ macro autoRoute*(args: varargs[untyped]): untyped =
             var handler = quote do:
                 proc `handlerName`(`ctx`: Context) {.async.} =
                     var `body` = %*{}
-                    if `ctx`.request.body != "":
+                    if `ctx`.request.contentType == "application/json":
                         `body` = parseJson `ctx`.request.body
 
             var call = newCall ident(route.name)
@@ -170,7 +170,7 @@ macro autoRoute*(args: varargs[untyped]): untyped =
 
                 let 
                     argName = newLit arg.name
-                    argTmpName = ident "pgTmp_" & arg.name
+                    argTmpName = ident "pgTmp" & arg.name
                     argType = arg.kind
                     default = arg.default
 
@@ -191,7 +191,10 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                     of bodyPlace:
                         handler[^1].add quote do:
                             var `argTmpName`: `argType` = `default`
-                            if `body`.hasKey(`argName`):
+                            if `ctx`.request.contentType.split(";")[0] == "multipart/form-data":
+                                if `ctx`.getFormParamsOption(`argName`).isSome:
+                                    `argTmpName` = unmarshal(`ctx`.getFormParamsOption(`argName`).get, `argType`)
+                            elif `body`.hasKey(`argName`):
                                 `argTmpName` = `body`[`argName`].to(`argType`)
                         
                 call.add quote do:
