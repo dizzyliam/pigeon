@@ -18,6 +18,9 @@ proc makeRoute*(def: NimNode, spec: RouteSpec): Route {.compileTime.} =
     # Default to the POST method (assume unsafe).
     result.verb = HttpPost
 
+    # Defaults to a pure proc
+    result.hasContext = -1
+
     if def[0].kind == nnkIdent:
         result.readName def[0].strVal
 
@@ -38,16 +41,11 @@ proc makeRoute*(def: NimNode, spec: RouteSpec): Route {.compileTime.} =
         result.url = spec.url
     else:
         result.url = "/" & result.name
-
-    # Check for a native prologue route.
-    if def[3].len == 2 and def[3][1][1].strVal == "Context":
-        result.isPrologue = true
-        return
     
     # Parse out all the proc's arguments.
     if def[3].len > 1:
 
-        for i in def[3][1..^1]:
+        for index, i in def[3][1..^1]:
             i.expectKind nnkIdentDefs
 
             for arg in i[0..^3]:
@@ -61,5 +59,10 @@ proc makeRoute*(def: NimNode, spec: RouteSpec): Route {.compileTime.} =
                     place = urlPlace
 
                 result.takes.add Argument(name: arg.strVal, kind: i[^2], place: place, default: i[^1])
+
+                if i[^2].strVal == "Context":
+                    result.hasContext = index
+                    result.takes[^1].isContext = true
+
 
 

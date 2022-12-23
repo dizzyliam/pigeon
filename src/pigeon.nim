@@ -80,7 +80,7 @@ macro autoRoute*(args: varargs[untyped]): untyped =
             routeNameLit = ident route.name
         
         # Handle native prologue routes.
-        if route.isPrologue:
+        if route.takes.len == 1 and route.takes[0].isContext and returns.kind == nnkEmpty:
 
             serverSide:
                 result.add def
@@ -88,9 +88,6 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                     `pgApp`.addRoute(`url`, `routeNameLit`, @[`verb`])
             
             continue
-        
-        # Add proc definition.
-        result.add def
 
         # Create new innards for the client side version of the proc.
         clientSide:
@@ -109,6 +106,10 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                     `pgParams`: seq[(string, string)]
             
             for t in route.takes:
+                
+                # Don't handle context on client side.
+                if t.isContext:
+                    continue
 
                 let
                     argName = newLit t.name
@@ -147,11 +148,22 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                     `resultStatement`
                 else:
                     raise newException(IOError, "HTTP Error " & $response.status)
-                    
-            result[^1][^1] = newContent
+            
+            # Substitute in new content
+            def[^1] = newContent
+
+            # Remove context if present
+            if route.hasContext >= 0:
+                def[3].del route.hasContext + 1
+
+            # Add proc
+            result.add def
 
         # Build the server side route.
         serverSide:
+
+            # Add proc
+            result.add def
 
             let 
                 handlerName = ident(route.name & "PGHandler" & $route.suffix)
@@ -167,6 +179,11 @@ macro autoRoute*(args: varargs[untyped]): untyped =
             var call = newCall ident(route.name)
 
             for arg in route.takes:
+
+                if arg.isContext:
+                    call.add quote do:
+                        `ctx`
+                    continue
 
                 let 
                     argName = newLit arg.name
@@ -191,7 +208,7 @@ macro autoRoute*(args: varargs[untyped]): untyped =
                     of bodyPlace:
                         handler[^1].add quote do:
                             var `argTmpName`: `argType` = `default`
-                            if `ctx`.request.contentType.split(";")[0] == "multipart/form-data":
+                            if `ctx`.request.contentType.split(";")[0] in ["multipart/form-data", "application/x-www-form-urlencoded"]:
                                 if `ctx`.getFormParamsOption(`argName`).isSome:
                                     `argTmpName` = unmarshal(`ctx`.getFormParamsOption(`argName`).get, `argType`)
                             elif `body`.hasKey(`argName`):

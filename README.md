@@ -71,9 +71,18 @@ All arguments not included `{in the path}` will be expected in a JSON body by de
 
 All procdeure arguments and return values, except for string types, are marshaled as JSON, allowing the use of custom types as well as primitives.
 
-## Prologue Routes
+## Prologue Context
 
-For non-RPC routes, such as for serving the app itself, you can directly include Prologue handlers under `autoRoute`. For example:
+To access the Prologue context, just accept a `Context` type in your proc:
+
+```nim
+proc increment(n: int, ctx: Context): int =
+    echo ctx.request.reqMethod
+    counter += n
+    return counter
+```
+
+For non-RPC routes, such as for serving the app itself, you can directly include Prologue handlers under `autoRoute` by defining it as a proc that accepts only a Context type and has no return value. For example:
 
 ```nim
 GET "/"

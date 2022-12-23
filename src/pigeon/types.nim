@@ -15,12 +15,13 @@ type
         kind*: NimNode
         place*: Place
         default*: NimNode
+        isContext*: bool
     
     Route* = object
         name*: string
         url*: string
         suffix*: int
-        isPrologue*: bool
+        hasContext*: int
         verb*: HttpMethod
         returns*: NimNode
         takes*: seq[Argument]
